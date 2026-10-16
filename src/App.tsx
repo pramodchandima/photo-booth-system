@@ -8,12 +8,19 @@ interface FrameItem {
   src: string;
 }
 
+// Toast notification type
+interface Toast {
+  id: number;
+  type: 'success' | 'error' | 'info';
+  message: string;
+}
+
 // ඔයාගේ frames ටික මෙතනට දාන්න (public/frames/ ඇතුළේ තියෙන ඒවා)
 const FRAMES: FrameItem[] = [
-  { id: 1, name: 'Frame 1 (21:9)', src: '/frames/frame1.png' },
-  { id: 2, name: 'Frame 2 (16:9)', src: '/frames/frame2.png' },
-  { id: 3, name: 'Frame 3 (9:16)', src: '/frames/frame3.png' },
-  { id: 4, name: 'Frame 4 (3:4 Vertical)', src: '/frames/frame4_3x4.png' },
+  { id: 1, name: 'Frame 1 (3:4 Vertical)', src: '/frames/frame4_3x4.png' },
+  { id: 2, name: 'Frame 2 (21:9)', src: '/frames/frame1.png' },
+  { id: 3, name: 'Frame 3 (16:9)', src: '/frames/frame2.png' },
+  { id: 4, name: 'Frame 4 (9:16)', src: '/frames/frame3.png' },
 ];
 
 export default function App() {
@@ -21,10 +28,34 @@ export default function App() {
   const [selectedFrame, setSelectedFrame] = useState<string>(FRAMES[0].src);
   const [mergedImageUrl, setMergedImageUrl] = useState<string | null>(null);
   const [uploading, setUploading] = useState<boolean>(false);
-  const [driveLink, setDriveLink] = useState<string | null>(null);
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const [showGalleryModal, setShowGalleryModal] = useState<boolean>(false);
 
-  // TypeScript වලදී Canvas එකට HTMLCanvasElement type එක දෙන්න ඕනේ
+  // Gallery URL from env or fallback placeholder
+  const galleryUrl = import.meta.env.VITE_GALLERY_URL || '';
+
+  // Canvas ref
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  // Helper to show top-right toast notifications
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    const id = Date.now();
+    setToasts((prev) => [...prev, { id, message, type }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 4000);
+  };
+
+  const removeToast = (id: number) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  };
+
+  // Reset preview function
+  const handleReset = () => {
+    setUserImage(null);
+    setMergedImageUrl(null);
+    showToast('Cleared / Reset', 'info');
+  };
 
   // 1. Phone එකෙන් Photo එක ගත්තම හෝ තෝරපුවම වැඩ කරන function එක
   const handleImageCapture = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -34,7 +65,7 @@ export default function App() {
       reader.onload = (event: ProgressEvent<FileReader>) => {
         if (typeof event.target?.result === 'string') {
           setUserImage(event.target.result);
-          setDriveLink(null);
+          showToast('Photo loaded into preview', 'info');
         }
       };
       reader.readAsDataURL(file);
@@ -55,29 +86,21 @@ export default function App() {
     frameImg.crossOrigin = 'anonymous';
     baseImg.crossOrigin = 'anonymous';
 
-    // Frame එක සහ User Photo එක load වූ පසු Canvas එකට draw කරනු ලැබේ
     frameImg.onload = () => {
-      // Frame එකේ සැබෑ දිග පළල අනුව Canvas එක සකස් කරයි (Landscape / Portrait auto-match)
       const WIDTH = frameImg.width || 1920;
       const HEIGHT = frameImg.height || 1080;
       canvas.width = WIDTH;
       canvas.height = HEIGHT;
 
       baseImg.onload = () => {
-        // User photo එක frame එකේ මැදට cover වන පරිදි scale කර ගැනීම
         const scale = Math.max(WIDTH / baseImg.width, HEIGHT / baseImg.height);
         const x = (WIDTH - baseImg.width * scale) / 2;
         const y = (HEIGHT - baseImg.height * scale) / 2;
 
         ctx.clearRect(0, 0, WIDTH, HEIGHT);
-
-        // 1. මුලින්ම User Photo එක යටින් draw කරයි
         ctx.drawImage(baseImg, x, y, baseImg.width * scale, baseImg.height * scale);
-
-        // 2. Transparent Frame එක උඩින් overlay කරයි
         ctx.drawImage(frameImg, 0, 0, WIDTH, HEIGHT);
 
-        // Preview & upload සඳහා final merged data URL එක ලබා ගැනීම
         setMergedImageUrl(canvas.toDataURL('image/png'));
       };
 
@@ -87,28 +110,24 @@ export default function App() {
     frameImg.src = selectedFrame;
   }, [userImage, selectedFrame]);
 
-  // 3. හැදුණු Final Image එක Backend එක හරහා Google Drive එකට යවන function එක
-  // 3. Backend එකක් නැතුව කෙලින්ම Google Apps Script හරහා Drive එකට යවන function එක
+  // 3. හැදුණු Final Image එක Google Apps Script හරහා Drive එකට යවන function එක
   const handleUploadToDrive = async () => {
     if (!mergedImageUrl) return;
     setUploading(true);
 
-    // Google Apps Script Web App URL එක .env එකෙන් ලබාගනී
     const GOOGLE_SCRIPT_URL = import.meta.env.VITE_GOOGLE_SCRIPT_URL;
 
     if (!GOOGLE_SCRIPT_URL) {
-      alert('Google Apps Script URL එක (.env) සකසා නැත!');
+      showToast('Google Apps Script URL එක (.env) සකසා නැත!', 'error');
       setUploading(false);
       return;
     }
 
     try {
-      // Data URL එකෙන් "data:image/png;base64," කියන මුල් කොටස අයින් කරලා Base64 string එක විතරක් ගන්නවා
       const base64Data = mergedImageUrl.split(',')[1];
 
       const response = await fetch(GOOGLE_SCRIPT_URL, {
         method: 'POST',
-        // CORS ප්‍රශ්න නොඑන්න text/plain විදිහට JSON එක යවනවා
         headers: {
           'Content-Type': 'text/plain;charset=utf-8',
         },
@@ -117,24 +136,66 @@ export default function App() {
 
       const data = await response.json();
       if (data.success) {
-        setDriveLink(data.viewLink);
-        alert('Photo එක සාර්ථකව Google Drive එකට Upload වුණා!');
+        showToast('Photo එක Drive එකට upload වුණා! Ready for next photo.', 'success');
+        // Reset preview to allow taking the next photo instantly
+        setUserImage(null);
+        setMergedImageUrl(null);
       } else {
-        alert('Upload කිරීම අසාර්ථකයි: ' + data.error);
+        showToast('Upload කිරීම අසාර්ථකයි: ' + data.error, 'error');
       }
     } catch (error) {
       console.error('Error uploading:', error);
-      alert('Upload කිරීමේදී දෝෂයක් ඇති වුණා!');
+      showToast('Upload කිරීමේදී දෝෂයක් ඇති වුණා!', 'error');
     } finally {
       setUploading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-black text-white flex flex-col items-center p-4 font-sans selection:bg-neutral-800">
-      <h1 className="text-2xl font-bold text-white mb-5 tracking-wider uppercase flex items-center gap-2">
-        Digital Photo Booth
-      </h1>
+    <div className="min-h-screen bg-black text-white flex flex-col items-center p-4 font-sans selection:bg-neutral-800 relative">
+      {/* Top Right Notifications / Toasts Container */}
+      <div className="fixed top-4 right-4 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none">
+        {toasts.map((toast) => (
+          <div
+            key={toast.id}
+            className={`pointer-events-auto flex items-start justify-between gap-3 p-3.5 rounded-xl border shadow-2xl backdrop-blur-md transition-all animate-in slide-in-from-top-2 ${
+              toast.type === 'success'
+                ? 'bg-neutral-900/95 border-emerald-500/50 text-white'
+                : toast.type === 'error'
+                ? 'bg-neutral-900/95 border-red-500/50 text-white'
+                : 'bg-neutral-900/95 border-neutral-700 text-neutral-200'
+            }`}
+          >
+            <div className="flex items-center gap-2.5">
+              <span className="text-base">
+                {toast.type === 'success' ? '✅' : toast.type === 'error' ? '❌' : 'ℹ️'}
+              </span>
+              <p className="text-xs font-medium leading-relaxed">{toast.message}</p>
+            </div>
+            <button
+              onClick={() => removeToast(toast.id)}
+              className="text-neutral-400 hover:text-white text-xs p-1"
+            >
+              ✕
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {/* Header with Title and Shared Gallery Button */}
+      <div className="w-full max-w-md flex items-center justify-between mb-4">
+        <h1 className="text-xl font-bold text-white tracking-wider uppercase">
+          Digital Photo Booth
+        </h1>
+        {galleryUrl && (
+          <button
+            onClick={() => setShowGalleryModal(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-neutral-700 bg-neutral-900/80 hover:bg-neutral-800 text-xs font-medium text-neutral-200 transition"
+          >
+            <span>📱</span> Album QR
+          </button>
+        )}
+      </div>
 
       <div className="w-full max-w-md bg-neutral-950/90 border border-neutral-800 rounded-3xl p-6 shadow-2xl backdrop-blur-xl">
         {/* Hidden Canvas */}
@@ -145,7 +206,11 @@ export default function App() {
           <p className="text-xs uppercase tracking-wider text-neutral-400 font-semibold mb-2">Preview</p>
           {mergedImageUrl ? (
             <div className="rounded-2xl overflow-hidden border border-neutral-700 bg-neutral-900 shadow-xl transition-all">
-              <img src={mergedImageUrl} alt="Framed Preview" className="w-full h-auto object-contain max-h-[460px] mx-auto block" />
+              <img
+                src={mergedImageUrl}
+                alt="Framed Preview"
+                className="w-full h-auto object-contain max-h-[460px] mx-auto block"
+              />
             </div>
           ) : (
             <div className="h-72 rounded-2xl border-2 border-dashed border-neutral-800 bg-neutral-900/40 flex flex-col items-center justify-center text-neutral-400 text-center px-5">
@@ -158,10 +223,50 @@ export default function App() {
           )}
         </div>
 
-        {/* Step 2: Take or Select Photo Button (Moved below Preview) */}
-        <div className="mb-6">
-          <label className="flex items-center justify-center gap-2 w-full text-center py-3.5 px-5 rounded-2xl bg-neutral-100 text-black font-semibold cursor-pointer hover:bg-neutral-200 active:scale-[0.99] transition shadow-md">
-            <span>📷</span> Take Photo / Select Image
+        {/* Step 2: Camera Controls (Real Camera App Style Shutter & Reset) */}
+        <div className="flex items-center justify-center gap-7 mb-6 py-2">
+          {/* Reset / Clear Button */}
+          <button
+            type="button"
+            onClick={handleReset}
+            disabled={!mergedImageUrl && !userImage}
+            title="Reset / Clear Photo"
+            className="w-12 h-12 rounded-full border border-neutral-700 bg-neutral-900/90 hover:bg-neutral-800 disabled:opacity-20 disabled:cursor-not-allowed flex items-center justify-center text-neutral-300 hover:text-white transition active:scale-90 shadow-md"
+          >
+            <svg
+              className="w-5 h-5"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              viewBox="0 0 24 24"
+            >
+              <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+              <path d="M3 3v5h5" />
+            </svg>
+          </button>
+
+          {/* Real Camera Shutter Ring Button */}
+          <label
+            title="Take Photo / Select Image"
+            className="relative flex items-center justify-center w-20 h-20 rounded-full border-4 border-white/90 p-1 cursor-pointer hover:scale-105 active:scale-95 transition-all shadow-[0_0_20px_rgba(255,255,255,0.2)] bg-black group"
+          >
+            {/* Inner Shutter Core with Camera Icon */}
+            <div className="w-full h-full rounded-full bg-white group-hover:bg-neutral-200 transition-all flex items-center justify-center text-neutral-900 shadow-inner">
+              <svg
+                className="w-7 h-7"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                viewBox="0 0 24 24"
+              >
+                <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" />
+                <circle cx="12" cy="13" r="3.5" />
+              </svg>
+            </div>
             <input
               type="file"
               accept="image/*"
@@ -170,6 +275,9 @@ export default function App() {
               className="hidden"
             />
           </label>
+
+          {/* Spacer to keep shutter button perfectly centered */}
+          <div className="w-12 h-12" />
         </div>
 
         {/* Step 3: Frame Selection */}
@@ -180,10 +288,11 @@ export default function App() {
               <button
                 key={frame.id}
                 onClick={() => setSelectedFrame(frame.src)}
-                className={`py-2.5 px-3 rounded-xl border text-xs font-medium tracking-wide transition ${selectedFrame === frame.src
+                className={`py-2.5 px-3 rounded-xl border text-xs font-medium tracking-wide transition ${
+                  selectedFrame === frame.src
                     ? 'border-white bg-neutral-800 text-white shadow-inner font-semibold'
                     : 'border-neutral-800 bg-neutral-900/60 text-neutral-400 hover:border-neutral-700 hover:text-neutral-200'
-                  }`}
+                }`}
               >
                 {frame.name}
               </button>
@@ -198,33 +307,39 @@ export default function App() {
             disabled={uploading}
             className="w-full py-3.5 rounded-2xl bg-white hover:bg-neutral-200 text-black disabled:bg-neutral-800 disabled:text-neutral-500 font-bold transition shadow-lg active:scale-[0.99]"
           >
-            {uploading ? 'Uploading to Google Drive...' : '☁️ Save to Google Drive'}
+            {uploading ? 'Uploading to Google Drive...' : '☁️ Save & Next Photo'}
           </button>
         )}
+      </div>
 
-        {/* Step 5: QR Code for Instant Download */}
-        {driveLink && (
-          <div className="mt-6 p-5 bg-neutral-900/90 border border-neutral-800 rounded-2xl flex flex-col items-center text-center shadow-lg">
-            <span className="inline-block px-3 py-1 bg-emerald-500/10 text-emerald-400 text-xs font-semibold rounded-full mb-3 border border-emerald-500/20">
-              ✓ Upload Complete!
-            </span>
-            <div className="bg-white p-3.5 rounded-2xl shadow-inner mb-3">
-              <QRCodeCanvas value={driveLink} size={150} />
-            </div>
-            <p className="text-xs text-neutral-400 mb-2">
-              මේ QR එක Scan කරලා Photo එක Download කරගන්න පුළුවන්
+      {/* Shared Album QR Modal (Optional popup if user taps Album QR) */}
+      {showGalleryModal && galleryUrl && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-neutral-900 border border-neutral-800 rounded-3xl p-6 max-w-xs w-full text-center shadow-2xl relative">
+            <button
+              onClick={() => setShowGalleryModal(false)}
+              className="absolute top-4 right-4 text-neutral-400 hover:text-white text-sm"
+            >
+              ✕
+            </button>
+            <h3 className="text-base font-bold text-white mb-2">Event Gallery QR</h3>
+            <p className="text-xs text-neutral-400 mb-4">
+              Scan this QR to view and download all event photos from Google Drive.
             </p>
+            <div className="bg-white p-3 rounded-2xl inline-block mb-4 shadow-md">
+              <QRCodeCanvas value={galleryUrl} size={180} />
+            </div>
             <a
-              href={driveLink}
+              href={galleryUrl}
               target="_blank"
               rel="noreferrer"
-              className="text-white text-xs font-medium underline underline-offset-4 hover:text-neutral-300 transition"
+              className="block text-xs text-neutral-300 underline underline-offset-4 hover:text-white"
             >
-              Open in Google Drive ↗
+              Open Shared Drive Folder ↗
             </a>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
-}
+}
