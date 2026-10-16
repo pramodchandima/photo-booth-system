@@ -131,17 +131,37 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center p-4 font-sans">
-      <h1 className="text-2xl font-bold text-cyan-400 mb-4 tracking-wide">
+    <div className="min-h-screen bg-black text-white flex flex-col items-center p-4 font-sans selection:bg-neutral-800">
+      <h1 className="text-2xl font-bold text-white mb-5 tracking-wider uppercase flex items-center gap-2">
         Digital Photo Booth
       </h1>
 
-      <div className="w-full max-w-md bg-slate-900/80 border border-slate-800 rounded-2xl p-5 shadow-xl backdrop-blur-md">
-        
-        {/* Step 1: Take or Select Photo */}
-        <div className="mb-5">
-          <label className="block w-full text-center py-3 px-4 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 font-semibold cursor-pointer hover:opacity-90 transition">
-            📸 Take a Photo / Select Image
+      <div className="w-full max-w-md bg-neutral-950/90 border border-neutral-800 rounded-3xl p-6 shadow-2xl backdrop-blur-xl">
+        {/* Hidden Canvas */}
+        <canvas ref={canvasRef} className="hidden" />
+
+        {/* Step 1: Live Preview Box */}
+        <div className="mb-4">
+          <p className="text-xs uppercase tracking-wider text-neutral-400 font-semibold mb-2">Preview</p>
+          {mergedImageUrl ? (
+            <div className="rounded-2xl overflow-hidden border border-neutral-700 bg-neutral-900 shadow-xl transition-all">
+              <img src={mergedImageUrl} alt="Framed Preview" className="w-full h-auto object-contain max-h-[460px] mx-auto block" />
+            </div>
+          ) : (
+            <div className="h-72 rounded-2xl border-2 border-dashed border-neutral-800 bg-neutral-900/40 flex flex-col items-center justify-center text-neutral-400 text-center px-5">
+              <div className="w-12 h-12 rounded-full bg-neutral-800/80 flex items-center justify-center text-xl mb-3 text-neutral-300">
+                🖼️
+              </div>
+              <p className="text-sm font-medium">Photo එකක් ගත්තම හෝ තෝරපුවම</p>
+              <p className="text-xs text-neutral-500 mt-1">Preview එක මෙතන පෙනේවි</p>
+            </div>
+          )}
+        </div>
+
+        {/* Step 2: Take or Select Photo Button (Moved below Preview) */}
+        <div className="mb-6">
+          <label className="flex items-center justify-center gap-2 w-full text-center py-3.5 px-5 rounded-2xl bg-neutral-100 text-black font-semibold cursor-pointer hover:bg-neutral-200 active:scale-[0.99] transition shadow-md">
+            <span>📷</span> Take Photo / Select Image
             <input
               type="file"
               accept="image/*"
@@ -152,36 +172,18 @@ export default function App() {
           </label>
         </div>
 
-        {/* Hidden Canvas */}
-        <canvas ref={canvasRef} className="hidden" />
-
-        {/* Step 2: Live Preview */}
-        {mergedImageUrl ? (
-          <div className="mb-5">
-            <p className="text-sm text-slate-400 mb-2">Preview:</p>
-            <div className="rounded-xl overflow-hidden border-2 border-cyan-500/40 shadow-lg">
-              <img src={mergedImageUrl} alt="Framed Preview" className="w-full h-auto" />
-            </div>
-          </div>
-        ) : (
-          <div className="h-64 rounded-xl border-2 border-dashed border-slate-700 flex items-center justify-center text-slate-500 mb-5 text-center px-4">
-            Photo එකක් ගත්තම Preview එක මෙතන පෙන්නයි
-          </div>
-        )}
-
         {/* Step 3: Frame Selection */}
         <div className="mb-6">
-          <p className="text-sm text-slate-400 mb-2">Select a Frame:</p>
-          <div className="grid grid-cols-2 gap-3">
+          <p className="text-xs uppercase tracking-wider text-neutral-400 font-semibold mb-2.5">Select Frame</p>
+          <div className="grid grid-cols-2 gap-2.5">
             {FRAMES.map((frame) => (
               <button
                 key={frame.id}
                 onClick={() => setSelectedFrame(frame.src)}
-                className={`p-2 rounded-xl border text-sm font-medium transition ${
-                  selectedFrame === frame.src
-                    ? 'border-cyan-400 bg-cyan-500/10 text-cyan-300'
-                    : 'border-slate-800 bg-slate-800/50 text-slate-400'
-                }`}
+                className={`py-2.5 px-3 rounded-xl border text-xs font-medium tracking-wide transition ${selectedFrame === frame.src
+                    ? 'border-white bg-neutral-800 text-white shadow-inner font-semibold'
+                    : 'border-neutral-800 bg-neutral-900/60 text-neutral-400 hover:border-neutral-700 hover:text-neutral-200'
+                  }`}
               >
                 {frame.name}
               </button>
@@ -194,7 +196,7 @@ export default function App() {
           <button
             onClick={handleUploadToDrive}
             disabled={uploading}
-            className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 font-bold text-white transition shadow-lg"
+            className="w-full py-3.5 rounded-2xl bg-white hover:bg-neutral-200 text-black disabled:bg-neutral-800 disabled:text-neutral-500 font-bold transition shadow-lg active:scale-[0.99]"
           >
             {uploading ? 'Uploading to Google Drive...' : '☁️ Save to Google Drive'}
           </button>
@@ -202,21 +204,23 @@ export default function App() {
 
         {/* Step 5: QR Code for Instant Download */}
         {driveLink && (
-          <div className="mt-6 p-4 bg-slate-800/60 border border-slate-700 rounded-xl flex flex-col items-center text-center">
-            <p className="text-emerald-400 font-semibold mb-2">Upload Complete!</p>
-            <div className="bg-white p-3 rounded-lg mb-3">
-              <QRCodeCanvas value={driveLink} size={140} />
+          <div className="mt-6 p-5 bg-neutral-900/90 border border-neutral-800 rounded-2xl flex flex-col items-center text-center shadow-lg">
+            <span className="inline-block px-3 py-1 bg-emerald-500/10 text-emerald-400 text-xs font-semibold rounded-full mb-3 border border-emerald-500/20">
+              ✓ Upload Complete!
+            </span>
+            <div className="bg-white p-3.5 rounded-2xl shadow-inner mb-3">
+              <QRCodeCanvas value={driveLink} size={150} />
             </div>
-            <p className="text-xs text-slate-400 mb-2">
+            <p className="text-xs text-neutral-400 mb-2">
               මේ QR එක Scan කරලා Photo එක Download කරගන්න පුළුවන්
             </p>
             <a
               href={driveLink}
               target="_blank"
               rel="noreferrer"
-              className="text-cyan-400 text-sm underline"
+              className="text-white text-xs font-medium underline underline-offset-4 hover:text-neutral-300 transition"
             >
-              Open in Google Drive
+              Open in Google Drive ↗
             </a>
           </div>
         )}
