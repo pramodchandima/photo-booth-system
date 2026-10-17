@@ -1,5 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { QRCodeCanvas } from 'qrcode.react';
+import { saveAndBroadcastPhoto } from './gallerySync';
+import DisplayWall from './DisplayWall';
 
 // Frame එකක ව්‍යුහය (Type Interface)
 interface FrameItem {
@@ -24,6 +26,12 @@ const FRAMES: FrameItem[] = [
 ];
 
 export default function App() {
+  // Check if opened as dedicated wall view (?view=wall)
+  const [currentView, setCurrentView] = useState<'booth' | 'wall'>(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('view') === 'wall' ? 'wall' : 'booth';
+  });
+
   const [userImage, setUserImage] = useState<string | null>(null);
   const [selectedFrame, setSelectedFrame] = useState<string>(FRAMES[0].src);
   const [mergedImageUrl, setMergedImageUrl] = useState<string | null>(null);
@@ -131,11 +139,17 @@ export default function App() {
         headers: {
           'Content-Type': 'text/plain;charset=utf-8',
         },
-        body: JSON.stringify({ image: base64Data }),
+        body: JSON.stringify({
+          image: base64Data,
+          folderId: import.meta.env.VITE_GOOGLE_DRIVE_FOLDER_ID || undefined,
+        }),
       });
 
       const data = await response.json();
       if (data.success) {
+        // Broadcast to Live Wall in real-time (and save locally)
+        await saveAndBroadcastPhoto(mergedImageUrl);
+
         showToast('Photo එක Drive එකට upload වුණා! Ready for next photo.', 'success');
         // Reset preview to allow taking the next photo instantly
         setUserImage(null);
@@ -150,6 +164,11 @@ export default function App() {
       setUploading(false);
     }
   };
+
+  // If in dedicated Wall view, render DisplayWall
+  if (currentView === 'wall') {
+    return <DisplayWall onBackToBooth={() => setCurrentView('booth')} />;
+  }
 
   return (
     <div className="min-h-screen bg-black text-white flex flex-col items-center p-4 font-sans selection:bg-neutral-800 relative">
@@ -182,19 +201,31 @@ export default function App() {
         ))}
       </div>
 
-      {/* Header with Title and Shared Gallery Button */}
+      {/* Header with Title and Action Buttons */}
       <div className="w-full max-w-md flex items-center justify-between mb-4">
         <h1 className="text-xl font-bold text-white tracking-wider uppercase">
           Digital Photo Booth
         </h1>
-        {galleryUrl && (
+        <div className="flex items-center gap-2">
+          {/* Button to open Big Screen Live Wall */}
           <button
-            onClick={() => setShowGalleryModal(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-neutral-700 bg-neutral-900/80 hover:bg-neutral-800 text-xs font-medium text-neutral-200 transition"
+            onClick={() => window.open(window.location.origin + '?view=wall', '_blank')}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-neutral-700 bg-neutral-900/80 hover:bg-neutral-800 text-xs font-medium text-emerald-400 hover:text-emerald-300 transition"
+            title="Open Live Wall in a new tab for big screens / TV"
           >
-            <span>📱</span> Album QR
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            Live Wall ↗
           </button>
-        )}
+
+          {galleryUrl && (
+            <button
+              onClick={() => setShowGalleryModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-neutral-700 bg-neutral-900/80 hover:bg-neutral-800 text-xs font-medium text-neutral-200 transition"
+            >
+              <span>📱</span> Album QR
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="w-full max-w-md bg-neutral-950/90 border border-neutral-800 rounded-3xl p-6 shadow-2xl backdrop-blur-xl">
@@ -276,8 +307,28 @@ export default function App() {
             />
           </label>
 
-          {/* Spacer to keep shutter button perfectly centered */}
-          <div className="w-12 h-12" />
+          {/* Compact Upload / Save Button on the Right Side of Capture */}
+          {mergedImageUrl ? (
+            <button
+              type="button"
+              onClick={handleUploadToDrive}
+              disabled={uploading}
+              title={uploading ? 'Uploading to Google Drive...' : 'Save & Upload to Drive'}
+              className="w-12 h-12 rounded-full border border-emerald-500/50 bg-emerald-500/20 hover:bg-emerald-500 hover:text-black text-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center transition-all active:scale-90 shadow-[0_0_15px_rgba(16,185,129,0.2)]"
+            >
+              {uploading ? (
+                <svg className="w-5 h-5 animate-spin" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
+                </svg>
+              ) : (
+                <span className="text-lg">☁️</span>
+              )}
+            </button>
+          ) : (
+            /* Spacer to keep shutter centered when no photo */
+            <div className="w-12 h-12" />
+          )}
         </div>
 
         {/* Step 3: Frame Selection */}
@@ -300,15 +351,17 @@ export default function App() {
           </div>
         </div>
 
-        {/* Step 4: Upload Button */}
+        {/* Small save status helper if merged image exists */}
         {mergedImageUrl && (
-          <button
-            onClick={handleUploadToDrive}
-            disabled={uploading}
-            className="w-full py-3.5 rounded-2xl bg-white hover:bg-neutral-200 text-black disabled:bg-neutral-800 disabled:text-neutral-500 font-bold transition shadow-lg active:scale-[0.99]"
-          >
-            {uploading ? 'Uploading to Google Drive...' : '☁️ Save & Next Photo'}
-          </button>
+          <div className="mt-2 text-center">
+            <button
+              onClick={handleUploadToDrive}
+              disabled={uploading}
+              className="text-xs text-neutral-400 hover:text-emerald-400 font-medium transition flex items-center justify-center gap-1.5 mx-auto"
+            >
+              <span>{uploading ? '⏳ Uploading...' : '☁️ Save & Next Photo'}</span>
+            </button>
+          </div>
         )}
       </div>
 
