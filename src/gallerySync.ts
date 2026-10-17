@@ -34,8 +34,9 @@ export async function fetchDrivePhotos(): Promise<BoothPhoto[]> {
   const SCRIPT_URL = import.meta.env.GOOGLE_SCRIPT_URL;
   if (!SCRIPT_URL) return [];
 
-  const folderId = import.meta.env.GOOGLE_DRIVE_FOLDER;
-  const fetchUrl = folderId ? `${SCRIPT_URL}?folderId=${encodeURIComponent(folderId)}` : SCRIPT_URL;
+  const rawFolderId = import.meta.env.GOOGLE_DRIVE_FOLDER;
+  const cleanFolderId = (rawFolderId && !rawFolderId.startsWith('http')) ? rawFolderId.trim() : '';
+  const fetchUrl = cleanFolderId ? `${SCRIPT_URL}?folderId=${encodeURIComponent(cleanFolderId)}` : SCRIPT_URL;
 
   try {
     const res = await fetch(fetchUrl, {

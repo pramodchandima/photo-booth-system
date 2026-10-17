@@ -126,13 +126,17 @@ export default function App() {
     const GOOGLE_SCRIPT_URL = import.meta.env.GOOGLE_SCRIPT_URL;
 
     if (!GOOGLE_SCRIPT_URL) {
-      showToast('Google Apps Script URL එක (.env) සකසා නැත!', 'error');
+      showToast('Google Apps Script URL is not configured in .env!', 'error');
       setUploading(false);
       return;
     }
 
     try {
       const base64Data = mergedImageUrl.split(',')[1];
+
+      // Ensure folderId is not mistakenly assigned a full script URL
+      const rawFolderId = import.meta.env.GOOGLE_DRIVE_FOLDER;
+      const cleanFolderId = (rawFolderId && !rawFolderId.startsWith('http')) ? rawFolderId.trim() : undefined;
 
       const response = await fetch(GOOGLE_SCRIPT_URL, {
         method: 'POST',
@@ -141,7 +145,7 @@ export default function App() {
         },
         body: JSON.stringify({
           image: base64Data,
-          folderId: import.meta.env.GOOGLE_DRIVE_FOLDER || undefined,
+          folderId: cleanFolderId,
         }),
       });
 
@@ -150,16 +154,16 @@ export default function App() {
         // Broadcast to Live Wall in real-time (and save locally)
         await saveAndBroadcastPhoto(mergedImageUrl);
 
-        showToast('Photo එක Drive එකට upload වුණා! Ready for next photo.', 'success');
+        showToast('Photo uploaded to Google Drive! Ready for next photo.', 'success');
         // Reset preview to allow taking the next photo instantly
         setUserImage(null);
         setMergedImageUrl(null);
       } else {
-        showToast('Upload කිරීම අසාර්ථකයි: ' + data.error, 'error');
+        showToast('Upload failed: ' + (data.error || 'Unknown error'), 'error');
       }
     } catch (error) {
       console.error('Error uploading:', error);
-      showToast('Upload කිරීමේදී දෝෂයක් ඇති වුණා!', 'error');
+      showToast('An error occurred while uploading photo!', 'error');
     } finally {
       setUploading(false);
     }
@@ -171,9 +175,9 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-black text-white flex flex-col items-center p-4 font-sans selection:bg-neutral-800 relative">
+    <div className="min-h-screen bg-black text-white flex flex-col items-center p-3 sm:p-4 md:p-6 font-sans selection:bg-neutral-800 relative">
       {/* Top Right Notifications / Toasts Container */}
-      <div className="fixed top-4 right-4 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none">
+      <div className="fixed top-4 right-4 left-4 sm:left-auto z-50 flex flex-col gap-2 max-w-sm sm:w-full pointer-events-none">
         {toasts.map((toast) => (
           <div
             key={toast.id}
@@ -202,8 +206,8 @@ export default function App() {
       </div>
 
       {/* Header with Title and Action Buttons */}
-      <div className="w-full max-w-md flex items-center justify-between mb-4">
-        <h1 className="text-xl font-bold text-white tracking-wider uppercase">
+      <div className="w-full max-w-md flex items-center justify-between mb-4 px-1">
+        <h1 className="text-lg sm:text-xl font-bold text-white tracking-wider uppercase">
           Digital Photo Booth
         </h1>
         <div className="flex items-center gap-2">
@@ -228,7 +232,7 @@ export default function App() {
         </div>
       </div>
 
-      <div className="w-full max-w-md bg-neutral-950/90 border border-neutral-800 rounded-3xl p-6 shadow-2xl backdrop-blur-xl">
+      <div className="w-full max-w-md bg-neutral-950/90 border border-neutral-800 rounded-3xl p-4 sm:p-6 shadow-2xl backdrop-blur-xl">
         {/* Hidden Canvas */}
         <canvas ref={canvasRef} className="hidden" />
 
@@ -240,16 +244,16 @@ export default function App() {
               <img
                 src={mergedImageUrl}
                 alt="Framed Preview"
-                className="w-full h-auto object-contain max-h-[460px] mx-auto block"
+                className="w-full h-auto object-contain max-h-[500px] mx-auto block"
               />
             </div>
           ) : (
-            <div className="h-72 rounded-2xl border-2 border-dashed border-neutral-800 bg-neutral-900/40 flex flex-col items-center justify-center text-neutral-400 text-center px-5">
+            <div className="h-64 sm:h-72 rounded-2xl border-2 border-dashed border-neutral-800 bg-neutral-900/40 flex flex-col items-center justify-center text-neutral-400 text-center px-4">
               <div className="w-12 h-12 rounded-full bg-neutral-800/80 flex items-center justify-center text-xl mb-3 text-neutral-300">
                 🖼️
               </div>
-              <p className="text-sm font-medium">Photo එකක් ගත්තම හෝ තෝරපුවම</p>
-              <p className="text-xs text-neutral-500 mt-1">Preview එක මෙතන පෙනේවි</p>
+              <p className="text-sm font-medium">Capture or select a photo</p>
+              <p className="text-xs text-neutral-500 mt-1">Preview will appear here</p>
             </div>
           )}
         </div>
