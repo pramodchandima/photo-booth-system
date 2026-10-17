@@ -31,10 +31,10 @@ function openDB(): Promise<IDBDatabase> {
 
 // 1. Fetch live photos directly from Google Drive Folder via Apps Script
 export async function fetchDrivePhotos(): Promise<BoothPhoto[]> {
-  const SCRIPT_URL = import.meta.env.VITE_GOOGLE_SCRIPT_URL;
+  const SCRIPT_URL = import.meta.env.GOOGLE_SCRIPT_URL || import.meta.env.VITE_GOOGLE_SCRIPT_URL;
   if (!SCRIPT_URL) return [];
 
-  const folderId = import.meta.env.VITE_GOOGLE_DRIVE_FOLDER_ID;
+  const folderId = import.meta.env.GOOGLE_DRIVE_FOLDER_ID || import.meta.env.VITE_GOOGLE_DRIVE_FOLDER_ID;
   const fetchUrl = folderId ? `${SCRIPT_URL}?folderId=${encodeURIComponent(folderId)}` : SCRIPT_URL;
 
   try {
