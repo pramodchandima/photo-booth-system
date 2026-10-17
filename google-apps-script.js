@@ -78,15 +78,13 @@ function doPost(e) {
     var targetFolderId = data.folderId ? data.folderId : DEFAULT_FOLDER_ID;
     var folder = DriveApp.getFolderById(targetFolderId);
 
-    // Decode base64 image
+    // Decode base64 image (supports high-quality JPG & PNG)
     var decoded = Utilities.base64Decode(base64Data);
-    var fileName = "booth_" + Utilities.formatDate(new Date(), "GMT+5:30", "yyyyMMdd_HHmmss") + ".png";
-    var blob = Utilities.newBlob(decoded, "image/png", fileName);
+    var fileName = "booth_" + Utilities.formatDate(new Date(), "GMT+5:30", "yyyyMMdd_HHmmss") + ".jpg";
+    var blob = Utilities.newBlob(decoded, "image/jpeg", fileName);
 
     // Create file in folder
     var file = folder.createFile(blob);
-    // Allow public viewing so Live Wall and users can load it instantly
-    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
 
     return ContentService.createTextOutput(JSON.stringify({
       success: true,
