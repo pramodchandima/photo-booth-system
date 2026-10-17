@@ -123,7 +123,7 @@ export default function App() {
     if (!mergedImageUrl) return;
     setUploading(true);
 
-    const GOOGLE_SCRIPT_URL = import.meta.env.GOOGLE_SCRIPT_URL || import.meta.env.VITE_GOOGLE_SCRIPT_URL;
+    const GOOGLE_SCRIPT_URL = import.meta.env.GOOGLE_SCRIPT_URL;
 
     if (!GOOGLE_SCRIPT_URL) {
       showToast('Google Apps Script URL එක (.env) සකසා නැත!', 'error');
@@ -141,7 +141,7 @@ export default function App() {
         },
         body: JSON.stringify({
           image: base64Data,
-          folderId: import.meta.env.GOOGLE_DRIVE_FOLDER_ID || import.meta.env.VITE_GOOGLE_DRIVE_FOLDER_ID || undefined,
+          folderId: import.meta.env.GOOGLE_DRIVE_FOLDER || undefined,
         }),
       });
 
