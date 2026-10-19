@@ -17,6 +17,15 @@ interface Toast {
   message: string;
 }
 
+// Queue item type for background upload
+interface QueueItem {
+  id: string;
+  dataUrl: string;
+  status: 'pending' | 'uploading' | 'failed';
+  error?: string;
+  timestamp: number;
+}
+
 // ඔයාගේ frames ටික මෙතනට දාන්න (public/frames/ ඇතුළේ තියෙන ඒවා)
 const FRAMES: FrameItem[] = [
   { id: 1, name: 'Frame 1 (3:4 Vertical)', src: '/frames/frame4_3x4.png' },
@@ -35,9 +44,12 @@ export default function App() {
   const [userImage, setUserImage] = useState<string | null>(null);
   const [selectedFrame, setSelectedFrame] = useState<string>(FRAMES[0].src);
   const [mergedImageUrl, setMergedImageUrl] = useState<string | null>(null);
-  const [uploading, setUploading] = useState<boolean>(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [showGalleryModal, setShowGalleryModal] = useState<boolean>(false);
+
+  // Upload Queue State
+  const [uploadQueue, setUploadQueue] = useState<QueueItem[]>([]);
+  const isProcessingQueue = useRef<boolean>(false);
 
   // Gallery URL from env or fallback placeholder
   const galleryUrl = import.meta.env.VITE_GALLERY_URL || '';
@@ -62,7 +74,7 @@ export default function App() {
   const handleReset = () => {
     setUserImage(null);
     setMergedImageUrl(null);
-    showToast('Cleared / Reset', 'info');
+    showToast('Cleared / Ready for next photo', 'info');
   };
 
   // 1. Phone එකෙන් Photo එක ගත්තම හෝ තෝරපුවම වැඩ කරන function එක
@@ -78,6 +90,8 @@ export default function App() {
       };
       reader.readAsDataURL(file);
     }
+    // Clear input value so same camera/file can be re-triggered smoothly
+    e.target.value = '';
   };
 
   // 2. Photo එක හෝ Frame එක වෙනස් වෙන හැම වෙලාවෙම Canvas එකේ දෙක එකතු කරලා පෙන්නනවා
@@ -120,55 +134,111 @@ export default function App() {
     frameImg.src = selectedFrame;
   }, [userImage, selectedFrame]);
 
-  // 3. හැදුණු Final Image එක Google Apps Script හරහා Drive එකට යවන function එක
-  const handleUploadToDrive = async () => {
+  // 3. Queue එකට photo එකක් එකතු කිරීම සහ camera view එක එකපාර clear කිරීම
+  const handleQueueUpload = () => {
     if (!mergedImageUrl) return;
-    setUploading(true);
 
-    const GOOGLE_SCRIPT_URL = import.meta.env.GOOGLE_SCRIPT_URL;
+    const currentPhotoToQueue = mergedImageUrl;
+    const newItem: QueueItem = {
+      id: 'img_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+      dataUrl: currentPhotoToQueue,
+      status: 'pending',
+      timestamp: Date.now(),
+    };
 
-    if (!GOOGLE_SCRIPT_URL) {
-      showToast('Google Apps Script URL is not configured in .env!', 'error');
-      setUploading(false);
-      return;
-    }
+    // Instant save to Live Wall so attendees see it immediately
+    saveAndBroadcastPhoto(currentPhotoToQueue);
 
-    try {
-      const base64Data = mergedImageUrl.split(',')[1];
+    // Queue එකට add කරමු
+    setUploadQueue((prev) => [...prev, newItem]);
 
-      // Ensure folderId is not mistakenly assigned a full script URL
-      const rawFolderId = import.meta.env.GOOGLE_DRIVE_FOLDER;
-      const cleanFolderId = (rawFolderId && !rawFolderId.startsWith('http')) ? rawFolderId.trim() : undefined;
+    // Next photo එක ගන්න instant reset කරමු (UI block වෙන්නේ නැහැ)
+    setUserImage(null);
+    setMergedImageUrl(null);
 
-      const response = await fetch(GOOGLE_SCRIPT_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'text/plain;charset=utf-8',
-        },
-        body: JSON.stringify({
-          image: base64Data,
-          folderId: cleanFolderId,
-        }),
-      });
+    showToast('Photo added to upload queue! You can take the next photo now.', 'success');
+  };
 
-      const data = await response.json();
-      if (data.success) {
-        // Broadcast to Live Wall in real-time (and save locally)
-        await saveAndBroadcastPhoto(mergedImageUrl);
+  // 4. Background Upload Queue Processor (FIFO loop)
+  useEffect(() => {
+    const processQueue = async () => {
+      if (isProcessingQueue.current) return;
 
-        showToast('Photo uploaded to Google Drive! Ready for next photo.', 'success');
-        // Reset preview to allow taking the next photo instantly
-        setUserImage(null);
-        setMergedImageUrl(null);
-      } else {
-        showToast('Upload failed: ' + (data.error || 'Unknown error'), 'error');
+      const nextItem = uploadQueue.find((item) => item.status === 'pending');
+      if (!nextItem) return;
+
+      isProcessingQueue.current = true;
+
+      // Mark this item as uploading
+      setUploadQueue((prev) =>
+        prev.map((item) => (item.id === nextItem.id ? { ...item, status: 'uploading' } : item))
+      );
+
+      const GOOGLE_SCRIPT_URL = import.meta.env.GOOGLE_SCRIPT_URL;
+      if (!GOOGLE_SCRIPT_URL) {
+        showToast('Google Apps Script URL is not configured in .env!', 'error');
+        setUploadQueue((prev) =>
+          prev.map((item) => (item.id === nextItem.id ? { ...item, status: 'failed', error: 'No Script URL' } : item))
+        );
+        isProcessingQueue.current = false;
+        return;
       }
-    } catch (error) {
-      console.error('Error uploading:', error);
-      showToast('An error occurred while uploading photo!', 'error');
-    } finally {
-      setUploading(false);
-    }
+
+      try {
+        const base64Data = nextItem.dataUrl.split(',')[1];
+        const rawFolderId = import.meta.env.GOOGLE_DRIVE_FOLDER;
+        const cleanFolderId = rawFolderId && !rawFolderId.startsWith('http') ? rawFolderId.trim() : undefined;
+
+        const response = await fetch(GOOGLE_SCRIPT_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'text/plain;charset=utf-8',
+          },
+          body: JSON.stringify({
+            image: base64Data,
+            folderId: cleanFolderId,
+          }),
+        });
+
+        const data = await response.json();
+        if (data.success) {
+          // Upload සම්පූර්ණ වූ පසු queue එකෙන් ඉවත් කරයි (ain wenawa)
+          setUploadQueue((prev) => prev.filter((item) => item.id !== nextItem.id));
+          showToast('Image uploaded to Drive successfully!', 'success');
+        } else {
+          setUploadQueue((prev) =>
+            prev.map((item) =>
+              item.id === nextItem.id ? { ...item, status: 'failed', error: data.error || 'Failed' } : item
+            )
+          );
+          showToast('Upload failed: ' + (data.error || 'Unknown error'), 'error');
+        }
+      } catch (err: any) {
+        console.error('Upload queue error:', err);
+        setUploadQueue((prev) =>
+          prev.map((item) =>
+            item.id === nextItem.id ? { ...item, status: 'failed', error: err?.message || 'Error' } : item
+          )
+        );
+        showToast('Upload error occurred for an image.', 'error');
+      } finally {
+        isProcessingQueue.current = false;
+      }
+    };
+
+    processQueue();
+  }, [uploadQueue]);
+
+  // Retry failed upload item
+  const handleRetryItem = (id: string) => {
+    setUploadQueue((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, status: 'pending', error: undefined } : item))
+    );
+  };
+
+  // Remove item from queue manually if needed
+  const handleRemoveQueueItem = (id: string) => {
+    setUploadQueue((prev) => prev.filter((item) => item.id !== id));
   };
 
   // If in dedicated Wall view, render DisplayWall
@@ -317,19 +387,11 @@ export default function App() {
           {mergedImageUrl ? (
             <button
               type="button"
-              onClick={handleUploadToDrive}
-              disabled={uploading}
-              title={uploading ? 'Uploading to Google Drive...' : 'Save & Upload to Drive'}
-              className="w-12 h-12 rounded-full border border-emerald-500/50 bg-emerald-500/20 hover:bg-emerald-500 hover:text-black text-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center transition-all active:scale-90 shadow-[0_0_15px_rgba(16,185,129,0.2)]"
+              onClick={handleQueueUpload}
+              title="Add to Upload Queue & Ready for Next Photo"
+              className="w-12 h-12 rounded-full border border-emerald-500/50 bg-emerald-500/20 hover:bg-emerald-500 hover:text-black text-emerald-400 flex items-center justify-center transition-all active:scale-90 shadow-[0_0_15px_rgba(16,185,129,0.2)] animate-pulse"
             >
-              {uploading ? (
-                <svg className="w-5 h-5 animate-spin" viewBox="0 0 24 24" fill="none">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
-                </svg>
-              ) : (
-                <span className="text-lg">☁️</span>
-              )}
+              <span className="text-xl">⬆️</span>
             </button>
           ) : (
             /* Spacer to keep shutter centered when no photo */
@@ -338,7 +400,7 @@ export default function App() {
         </div>
 
         {/* Step 3: Frame Selection */}
-        <div className="mb-6">
+        <div className="mb-4">
           <p className="text-xs uppercase tracking-wider text-neutral-400 font-semibold mb-2.5">Select Frame</p>
           <div className="grid grid-cols-2 gap-2.5">
             {FRAMES.map((frame) => (
@@ -357,19 +419,103 @@ export default function App() {
           </div>
         </div>
 
-        {/* Small save status helper if merged image exists */}
+        {/* Action button if merged image exists */}
         {mergedImageUrl && (
           <div className="mt-2 text-center">
             <button
-              onClick={handleUploadToDrive}
-              disabled={uploading}
-              className="text-xs text-neutral-400 hover:text-emerald-400 font-medium transition flex items-center justify-center gap-1.5 mx-auto"
+              onClick={handleQueueUpload}
+              className="w-full py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs tracking-wider uppercase transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-950"
             >
-              <span>{uploading ? '⏳ Uploading...' : '☁️ Save & Next Photo'}</span>
+              <span>⬆️ Queue Photo & Snap Next</span>
             </button>
           </div>
         )}
       </div>
+
+      {/* Upload Queue Bottom Bar (Uploading widihata thiyena images yatin loading widihata pennanna) */}
+      {uploadQueue.length > 0 && (
+        <div className="w-full max-w-md mt-4 p-4 rounded-3xl bg-neutral-950/95 border border-neutral-800 shadow-2xl backdrop-blur-xl animate-in slide-in-from-bottom-4">
+          <div className="flex items-center justify-between mb-3 px-1">
+            <div className="flex items-center gap-2">
+              <span className="relative flex h-2.5 w-2.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+              </span>
+              <span className="text-xs uppercase tracking-wider font-semibold text-neutral-300">
+                Upload Queue ({uploadQueue.length} {uploadQueue.length === 1 ? 'photo' : 'photos'})
+              </span>
+            </div>
+            <span className="text-[11px] text-neutral-400">
+              {uploadQueue.filter((q) => q.status === 'uploading').length > 0 ? 'Uploading to Drive...' : 'Waiting in Queue'}
+            </span>
+          </div>
+
+          {/* Queue Items List */}
+          <div className="flex gap-2.5 overflow-x-auto pb-1 pt-1 scrollbar-thin">
+            {uploadQueue.map((item, index) => (
+              <div
+                key={item.id}
+                className="relative flex-shrink-0 w-20 h-24 rounded-2xl overflow-hidden border border-neutral-800 bg-neutral-900 group"
+              >
+                {/* Image Thumbnail */}
+                <img
+                  src={item.dataUrl}
+                  alt={`Queue item ${index + 1}`}
+                  className="w-full h-full object-cover opacity-60"
+                />
+
+                {/* Status Overlay */}
+                <div className="absolute inset-0 bg-black/60 backdrop-blur-[1px] flex flex-col items-center justify-center p-1 text-center">
+                  {item.status === 'uploading' && (
+                    <>
+                      <svg className="w-6 h-6 animate-spin text-emerald-400 mb-1" viewBox="0 0 24 24" fill="none">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
+                      </svg>
+                      <span className="text-[9px] font-semibold text-emerald-300">Uploading</span>
+                    </>
+                  )}
+
+                  {item.status === 'pending' && (
+                    <>
+                      <div className="w-5 h-5 rounded-full border border-dashed border-neutral-400 animate-spin mb-1 opacity-70" />
+                      <span className="text-[9px] font-medium text-neutral-300">Queued #{index + 1}</span>
+                    </>
+                  )}
+
+                  {item.status === 'failed' && (
+                    <>
+                      <span className="text-sm mb-0.5">⚠️</span>
+                      <span className="text-[9px] text-red-400 font-semibold mb-1">Failed</span>
+                      <div className="flex gap-1">
+                        <button
+                          onClick={() => handleRetryItem(item.id)}
+                          className="px-1.5 py-0.5 rounded bg-emerald-600 hover:bg-emerald-500 text-[8px] text-white"
+                          title="Retry Upload"
+                        >
+                          Retry
+                        </button>
+                        <button
+                          onClick={() => handleRemoveQueueItem(item.id)}
+                          className="px-1 py-0.5 rounded bg-neutral-800 hover:bg-neutral-700 text-[8px] text-neutral-300"
+                          title="Remove from queue"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {/* Queue position badge */}
+                <span className="absolute top-1 left-1.5 text-[8px] font-bold px-1 rounded bg-black/70 text-neutral-300">
+                  #{index + 1}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Shared Album QR Modal (Optional popup if user taps Album QR) */}
       {showGalleryModal && galleryUrl && (
